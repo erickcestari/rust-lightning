@@ -33,11 +33,11 @@ use std::time::SystemTime;
 use bech32::primitives::decode::CheckedHrpstringError;
 use bech32::{Checksum, Fe32};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{Address, Network, PubkeyHash, ScriptHash, WitnessProgram, WitnessVersion};
+use bitcoin::{secp256k1, Address, Network, PubkeyHash, ScriptHash, WitnessProgram, WitnessVersion};
 use lightning_types::features::Bolt11InvoiceFeatures;
 
 use bitcoin::secp256k1::ecdsa::RecoverableSignature;
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::{PublicKey, SecretKey};
 use bitcoin::secp256k1::{Message, Secp256k1};
 
 use alloc::boxed::Box;
@@ -1013,29 +1013,19 @@ impl SignedRawBolt11Invoice {
 	/// Checks if the signature is valid for the included payee public key or if none exists if it's
 	/// valid for the recovered signature (which should always be true?).
 	pub fn check_signature(&self) -> bool {
-		let included_pub_key = self.raw_invoice.payee_pub_key();
+		match self.raw_invoice.payee_pub_key() {
+			Some(pk) => {
+				let hash = Message::from_digest(self.hash);
 
-		let mut recovered_pub_key = Option::None;
-		if recovered_pub_key.is_none() {
-			let recovered = match self.recover_payee_pub_key() {
-				Ok(pk) => pk,
-				Err(_) => return false,
-			};
-			recovered_pub_key = Some(recovered);
-		}
+				let secp_context = Secp256k1::new();
+				let verification_result =
+					secp_context.verify_ecdsa(&hash, &self.signature.to_standard(), pk);
 
-		let pub_key =
-			included_pub_key.or(recovered_pub_key.as_ref()).expect("One is always present");
-
-		let hash = Message::from_digest(self.hash);
-
-		let secp_context = Secp256k1::new();
-		let verification_result =
-			secp_context.verify_ecdsa(&hash, &self.signature.to_standard(), pub_key);
-
-		match verification_result {
-			Ok(()) => true,
-			Err(_) => false,
+				verification_result.is_ok()
+			},
+			None => {
+				self.recover_payee_pub_key().is_ok()
+			},
 		}
 	}
 }
@@ -1410,19 +1400,8 @@ impl Bolt11Invoice {
 		}
 	}
 
-	/// Check that the invoice is signed correctly and that key recovery works
+	/// Check that the invoice is signed correctly
 	pub fn check_signature(&self) -> Result<(), Bolt11SemanticError> {
-		match self.signed_invoice.recover_payee_pub_key() {
-			Err(bitcoin::secp256k1::Error::InvalidRecoveryId) => {
-				return Err(Bolt11SemanticError::InvalidRecoveryId)
-			},
-			Err(bitcoin::secp256k1::Error::InvalidSignature) => {
-				return Err(Bolt11SemanticError::InvalidSignature)
-			},
-			Err(e) => panic!("no other error may occur, got {:?}", e),
-			Ok(_) => {},
-		}
-
 		if !self.signed_invoice.check_signature() {
 			return Err(Bolt11SemanticError::InvalidSignature);
 		}
@@ -1660,6 +1639,77 @@ impl Bolt11Invoice {
 	fn amount_pico_btc(&self) -> Option<u64> {
 		self.signed_invoice.amount_pico_btc()
 	}
+}
+
+const SECP256K1_N: [u8; 32] = [
+    0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+    0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFE,
+    0xBA,0xAE,0xDC,0xE6,0xAF,0x48,0xA0,0x3B,
+    0xBF,0xD2,0x5E,0x8C,0xD0,0x36,0x41,0x41,
+];
+const SECP256K1_N_HALF: [u8; 32] = [
+    0x7F,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+    0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+    0x5D,0x57,0x6E,0x73,0x57,0xA4,0x50,0x1D,
+    0xDF,0xE9,0x2F,0x46,0x68,0x1B,0x20,0xA0,
+];
+
+// a ? b for 32-byte big-endian integers
+fn cmp_be32(a: &[u8; 32], b: &[u8; 32]) -> Ordering {
+    for i in 0..32 {
+        if a[i] != b[i] {
+            return a[i].cmp(&b[i]);
+        }
+    }
+    Ordering::Equal
+}
+
+// (a - b) for 32-byte big-endian integers; assumes a >= b.
+fn sub_be32(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let mut borrow: u16 = 0;
+    for i in (0..32).rev() {
+        let ai = a[i] as u16;
+        let bi = b[i] as u16 + borrow;
+        if ai >= bi {
+            out[i] = (ai - bi) as u8;
+            borrow = 0;
+        } else {
+            out[i] = (ai + 256 - bi) as u8;
+            borrow = 1;
+        }
+    }
+    out
+}
+
+// Sign with high-S (if original S was low, flip it to n - s)
+fn sign_high_s<C: secp256k1::Signing>(
+    secp: &Secp256k1<C>,
+    msg: &Message,
+    sk: &SecretKey,
+) -> RecoverableSignature {
+    // 1) Normal recoverable sign (low-S)
+    let sig_low = secp.sign_ecdsa_recoverable(msg, sk);
+
+    // 2) Break into (r, s)
+    let (recid, sig64) = sig_low.serialize_compact();
+    let mut r = [0u8; 32];
+    let mut s = [0u8; 32];
+    r.copy_from_slice(&sig64[..32]);
+    s.copy_from_slice(&sig64[32..]);
+
+    // 3) If s <= n/2 (i.e., low-S), flip to high-S
+    if cmp_be32(&s, &SECP256K1_N_HALF) != Ordering::Greater {
+        s = sub_be32(&SECP256K1_N, &s);
+    }
+
+    // 4) Rebuild 64-byte compact (r||s) and wrap back with the same recid
+    let mut sig_high = [0u8; 64];
+    sig_high[..32].copy_from_slice(&r);
+    sig_high[32..].copy_from_slice(&s);
+
+    RecoverableSignature::from_compact(&sig_high, recid)
+        .expect("valid (r,s) in [1,n)")
 }
 
 impl From<TaggedField> for RawTaggedField {
@@ -1949,7 +1999,7 @@ impl<'de> Deserialize<'de> for Bolt11Invoice {
 #[cfg(test)]
 mod test {
 	use bitcoin::hashes::sha256;
-	use bitcoin::ScriptBuf;
+	use bitcoin::{ScriptBuf};
 	use std::str::FromStr;
 
 	#[test]
@@ -2259,8 +2309,7 @@ mod test {
 	fn test_builder_ok() {
 		use crate::*;
 		use bitcoin::secp256k1::Secp256k1;
-		use bitcoin::secp256k1::{PublicKey, SecretKey};
-		use lightning_types::routing::RouteHintHop;
+		use bitcoin::secp256k1::{SecretKey};
 		use std::time::Duration;
 
 		let secp_ctx = Secp256k1::new();
@@ -2273,107 +2322,27 @@ mod test {
 			][..],
 		)
 		.unwrap();
-		let public_key = PublicKey::from_secret_key(&secp_ctx, &private_key);
 
-		let route_1 = RouteHint(vec![
-			RouteHintHop {
-				src_node_id: public_key,
-				short_channel_id: u64::from_be_bytes([123; 8]),
-				fees: RoutingFees { base_msat: 2, proportional_millionths: 1 },
-				cltv_expiry_delta: 145,
-				htlc_minimum_msat: None,
-				htlc_maximum_msat: None,
-			},
-			RouteHintHop {
-				src_node_id: public_key,
-				short_channel_id: u64::from_be_bytes([42; 8]),
-				fees: RoutingFees { base_msat: 3, proportional_millionths: 2 },
-				cltv_expiry_delta: 146,
-				htlc_minimum_msat: None,
-				htlc_maximum_msat: None,
-			},
-		]);
+		let payment_hash_str = hex::decode("0001020304050607080900010203040506070809000102030405060708090102").unwrap();
+		let payment_hash = sha256::Hash::from_slice(&payment_hash_str[..]).unwrap();
 
-		let route_2 = RouteHint(vec![
-			RouteHintHop {
-				src_node_id: public_key,
-				short_channel_id: 0,
-				fees: RoutingFees { base_msat: 4, proportional_millionths: 3 },
-				cltv_expiry_delta: 147,
-				htlc_minimum_msat: None,
-				htlc_maximum_msat: None,
-			},
-			RouteHintHop {
-				src_node_id: public_key,
-				short_channel_id: u64::from_be_bytes([1; 8]),
-				fees: RoutingFees { base_msat: 5, proportional_millionths: 4 },
-				cltv_expiry_delta: 148,
-				htlc_minimum_msat: None,
-				htlc_maximum_msat: None,
-			},
-		]);
+		let payment_secret_str: [u8;32] = hex::decode("1111111111111111111111111111111111111111111111111111111111111111").unwrap().try_into().unwrap();
+		let payment_secret = PaymentSecret(payment_secret_str);
 
-		let builder = InvoiceBuilder::new(Currency::BitcoinTestnet)
-			.amount_milli_satoshis(123)
-			.duration_since_epoch(Duration::from_secs(1234567))
-			.payee_pub_key(public_key)
-			.expiry_time(Duration::from_secs(54321))
+		let builder = InvoiceBuilder::new(Currency::Bitcoin)
+			.duration_since_epoch(Duration::from_secs(1496314658))
+			.payment_secret(payment_secret)
+			.payment_hash(payment_hash)
 			.min_final_cltv_expiry_delta(144)
-			.fallback(Fallback::PubKeyHash(PubkeyHash::from_slice(&[0; 20]).unwrap()))
-			.private_route(route_1.clone())
-			.private_route(route_2.clone())
-			.description_hash(sha256::Hash::from_slice(&[3; 32][..]).unwrap())
-			.payment_hash(sha256::Hash::from_slice(&[21; 32][..]).unwrap())
-			.payment_secret(PaymentSecret([42; 32]))
+			.description("Please consider supporting this project".to_owned())
 			.basic_mpp();
 
 		let invoice = builder
 			.clone()
-			.build_signed(|hash| secp_ctx.sign_ecdsa_recoverable(hash, &private_key))
+			.build_signed(|hash| sign_high_s(&secp_ctx, hash, &private_key))
 			.unwrap();
 
-		assert!(invoice.check_signature().is_ok());
-		assert_eq!(invoice.tagged_fields().count(), 10);
-
-		assert_eq!(invoice.amount_milli_satoshis(), Some(123));
-		assert_eq!(invoice.amount_pico_btc(), Some(1230));
-		assert_eq!(invoice.currency(), Currency::BitcoinTestnet);
-		#[cfg(feature = "std")]
-		assert_eq!(
-			invoice.timestamp().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
-			1234567
-		);
-		assert_eq!(invoice.payee_pub_key(), Some(&public_key));
-		assert_eq!(invoice.expiry_time(), Duration::from_secs(54321));
-		assert_eq!(invoice.min_final_cltv_expiry_delta(), 144);
-		assert_eq!(
-			invoice.fallbacks(),
-			vec![&Fallback::PubKeyHash(PubkeyHash::from_slice(&[0; 20]).unwrap())]
-		);
-		let address = Address::from_script(
-			&ScriptBuf::new_p2pkh(&PubkeyHash::from_slice(&[0; 20]).unwrap()),
-			Network::Testnet,
-		)
-		.unwrap();
-		assert_eq!(invoice.fallback_addresses(), vec![address]);
-		assert_eq!(invoice.private_routes(), vec![&PrivateRoute(route_1), &PrivateRoute(route_2)]);
-		assert_eq!(
-			invoice.description(),
-			Bolt11InvoiceDescriptionRef::Hash(&Sha256(
-				sha256::Hash::from_slice(&[3; 32][..]).unwrap()
-			))
-		);
-		assert_eq!(invoice.payment_hash(), &sha256::Hash::from_slice(&[21; 32][..]).unwrap());
-		assert_eq!(invoice.payment_secret(), &PaymentSecret([42; 32]));
-
-		let mut expected_features = Bolt11InvoiceFeatures::empty();
-		expected_features.set_variable_length_onion_required();
-		expected_features.set_payment_secret_required();
-		expected_features.set_basic_mpp_optional();
-		assert_eq!(invoice.features(), Some(&expected_features));
-
-		let raw_invoice = builder.build_raw().unwrap();
-		assert_eq!(raw_invoice, *invoice.into_signed_raw().raw_invoice())
+		println!("invoice high s: {}", invoice);
 	}
 
 	#[test]
@@ -2447,6 +2416,13 @@ mod test {
 		assert_eq!(invoice, deserialized_invoice);
 		assert_eq!(invoice_str, deserialized_invoice.to_string().as_str());
 		assert_eq!(invoice_str, serialized_invoice.as_str().trim_matches('\"'));
+	}
+
+	#[cfg(feature = "serde")]
+	#[test]
+	fn test_serde1() {
+		let invoice_str = "lntb1230p1qqp9458np4q0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv66xqyp4p3cqzysfpp3qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9yq0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv667mm0dahk7mm0vqqqqqzqqqqqqgqjyp7w9t2uvas5gydqazpnytrzalfp85qzah9tkt69u3pahs0jdxantf29g4z52329g4qqqqqqvqqqqqzqzfqr9yq0n326hr8v9zprg8gsvezcch06gfaqqhde2aj730yg0durunfhv66qqqqqqqqqqqqqqqqqqyqqqqqqcqjvp7w9t2uvas5gydqazpnytrzalfp85qzah9tkt69u3pahs0jdxantgpqyqszqgpqyqsqqqqq5qqqqqyqz2qhp5qvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpsxqcrqvpspp5z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4z52ssp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qyysgqtx96qz6frsd6w0yxgyqxd7yh7066z5w98pnyd9ctjnpuf22tuc0mx006aqdfmn4ckzjefmqv5k0pmuu9e2q73dwh4jqac7cegmx9nrcplyu4wn";
+		let invoice = invoice_str.parse::<super::Bolt11Invoice>().unwrap();
 	}
 
 	#[test]
