@@ -33,6 +33,7 @@ use std::time::SystemTime;
 use bech32::primitives::decode::CheckedHrpstringError;
 use bech32::{Checksum, Fe32};
 use bitcoin::hashes::{sha256, Hash};
+use bitcoin::hex::DisplayHex;
 use bitcoin::{secp256k1, Address, Network, PubkeyHash, ScriptHash, WitnessProgram, WitnessVersion};
 use lightning_types::features::Bolt11InvoiceFeatures;
 
@@ -48,6 +49,7 @@ use core::iter::FilterMap;
 use core::num::ParseIntError;
 use core::ops::Deref;
 use core::slice::Iter;
+use std::println;
 use core::str::FromStr;
 use core::time::Duration;
 
@@ -735,12 +737,22 @@ impl<D: tb::Bool, H: tb::Bool, C: tb::Bool, S: tb::Bool, M: tb::Bool>
 			RawHrp { currency: self.currency, raw_amount: self.amount, si_prefix: self.si_prefix };
 
 		let timestamp = self.timestamp.expect("ensured to be Some(t) by type T");
+		let tagged_fields_clone = self.tagged_fields.clone();
+		let feature_bits = tagged_fields_clone.iter().find(|&tf| match *tf {
+			TaggedField::Features(_) => true,
+			_ => false,
+		});
 
-		let tagged_fields = self
+		let mut tagged_fields = self
 			.tagged_fields
 			.into_iter()
 			.map(|tf| RawTaggedField::KnownSemantics(tf))
+			.filter(|tf| tf != &RawTaggedField::KnownSemantics(TaggedField::MinFinalCltvExpiryDelta(MinFinalCltvExpiryDelta(144))))
+			.filter(|tf| tf != &RawTaggedField::KnownSemantics(feature_bits.unwrap().clone()))
 			.collect::<Vec<_>>();
+
+		tagged_fields.insert(tagged_fields.len(),RawTaggedField::KnownSemantics(feature_bits.unwrap().clone()));
+
 
 		let data = RawDataPart { timestamp, tagged_fields };
 
@@ -1101,6 +1113,11 @@ impl RawBolt11Invoice {
 			}
 		}
 
+		let mut data: Vec<u8> = Vec::new();
+		data.extend(hrp_bytes);
+		data_part.clone().into_iter().fes_to_bytes().for_each(|v| data.push(v));
+
+		println!("data: {}", hex::encode(data));
 		// Hash bytes and data part sequentially
 		let mut engine = sha256::Hash::engine();
 		engine.input(hrp_bytes);
@@ -1131,6 +1148,7 @@ impl RawBolt11Invoice {
 		F: FnOnce(&Message) -> Result<RecoverableSignature, E>,
 	{
 		let raw_hash = self.signable_hash();
+		println!("raw_hash: {}", hex::encode(raw_hash));
 		let hash = Message::from_digest(raw_hash);
 		let signature = sign_method(&hash)?;
 
@@ -1693,6 +1711,7 @@ fn sign_high_s<C: secp256k1::Signing>(
 
     // 2) Break into (r, s)
     let (recid, sig64) = sig_low.serialize_compact();
+		println!("sig_low: {:?}", sig64);
     let mut r = [0u8; 32];
     let mut s = [0u8; 32];
     r.copy_from_slice(&sig64[..32]);
@@ -1707,6 +1726,8 @@ fn sign_high_s<C: secp256k1::Signing>(
     let mut sig_high = [0u8; 64];
     sig_high[..32].copy_from_slice(&r);
     sig_high[32..].copy_from_slice(&s);
+
+		println!("sig_high: {:?}", sig_high);
 
     RecoverableSignature::from_compact(&sig_high, recid)
         .expect("valid (r,s) in [1,n)")
@@ -2315,11 +2336,7 @@ mod test {
 		let secp_ctx = Secp256k1::new();
 
 		let private_key = SecretKey::from_slice(
-			&[
-				0xe1, 0x26, 0xf6, 0x8f, 0x7e, 0xaf, 0xcc, 0x8b, 0x74, 0xf5, 0x4d, 0x26, 0x9f, 0xe2,
-				0x06, 0xbe, 0x71, 0x50, 0x00, 0xf9, 0x4d, 0xac, 0x06, 0x7d, 0x1c, 0x04, 0xa8, 0xca,
-				0x3b, 0x2d, 0xb7, 0x34,
-			][..],
+			&hex::decode("e126f68f7eafcc8b74f54d269fe206be715000f94dac067d1c04a8ca3b2db734").unwrap()
 		)
 		.unwrap();
 
@@ -2334,8 +2351,7 @@ mod test {
 			.payment_secret(payment_secret)
 			.payment_hash(payment_hash)
 			.min_final_cltv_expiry_delta(144)
-			.description("Please consider supporting this project".to_owned())
-			.basic_mpp();
+			.description("Please consider supporting this project".to_owned());
 
 		let invoice = builder
 			.clone()
