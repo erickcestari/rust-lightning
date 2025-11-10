@@ -2138,7 +2138,7 @@ impl HTLCFailReason {
 
 /// Allows `decode_next_hop` to return the next hop packet bytes for either payments or onion
 /// message forwards.
-pub(crate) trait NextPacketBytes: AsMut<[u8]> {
+pub trait NextPacketBytes: AsMut<[u8]> {
 	fn new(len: usize) -> Self;
 }
 
