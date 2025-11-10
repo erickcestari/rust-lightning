@@ -40,7 +40,9 @@ pub(crate) mod peer_channel_encryptor;
 pub mod channel;
 #[cfg(not(fuzzing))]
 pub(crate) mod channel;
-
+#[cfg(feature = "expose_onion_utils")]
+pub mod onion_utils;
+#[cfg(not(feature = "expose_onion_utils"))]
 pub(crate) mod onion_utils;
 mod outbound_payment;
 pub mod wire;

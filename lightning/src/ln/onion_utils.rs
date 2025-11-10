@@ -2138,7 +2138,13 @@ impl HTLCFailReason {
 
 /// Allows `decode_next_hop` to return the next hop packet bytes for either payments or onion
 /// message forwards.
+#[cfg(not(feature = "expose_onion_utils"))]
 pub(crate) trait NextPacketBytes: AsMut<[u8]> {
+	fn new(len: usize) -> Self;
+}
+
+#[cfg(feature = "expose_onion_utils")]
+pub trait NextPacketBytes: AsMut<[u8]> {
 	fn new(len: usize) -> Self;
 }
 
@@ -2267,6 +2273,25 @@ impl Hop {
 }
 
 /// Error returned when we fail to decode the onion packet.
+#[cfg(feature = "expose_onion_utils")]
+#[derive(Debug)]
+pub(crate) enum OnionDecodeErr {
+	/// The HMAC of the onion packet did not match the hop data.
+	Malformed { err_msg: &'static str, reason: LocalHTLCFailureReason },
+	/// We failed to decode the onion payload.
+	///
+	/// If the payload we failed to decode belonged to a Trampoline onion, following the successful
+	/// decoding of the outer onion, the trampoline_shared_secret field should be set.
+	Relay {
+		err_msg: &'static str,
+		reason: LocalHTLCFailureReason,
+		shared_secret: SharedSecret,
+		trampoline_shared_secret: Option<SharedSecret>,
+	},
+}
+
+/// Error returned when we fail to decode the onion packet.
+#[cfg(not(feature = "expose_onion_utils"))]
 #[derive(Debug)]
 pub(crate) enum OnionDecodeErr {
 	/// The HMAC of the onion packet did not match the hop data.
@@ -2498,6 +2523,17 @@ where
 		},
 		Err(e) => Err(e),
 	}
+}
+
+#[cfg(feature = "expose_onion_utils")]
+pub fn decode_next_hop_wrapper<T, R: ReadableArgs<T>, N: NextPacketBytes>(
+    shared_secret: [u8; 32], 
+    hop_data: &[u8], 
+    hmac_bytes: [u8; 32],
+    payment_hash: Option<PaymentHash>, 
+    read_args: T,
+) -> Result<(R, Option<([u8; 32], N)>), OnionDecodeErr> {
+    decode_next_hop(shared_secret, hop_data, hmac_bytes, payment_hash, read_args)
 }
 
 /// Build a payment onion, returning the first hop msat and cltv values as well.
