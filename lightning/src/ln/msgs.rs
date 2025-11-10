@@ -2480,9 +2480,9 @@ mod fuzzy_internal_msgs {
 		pub attribution_data: Option<AttributionData>,
 	}
 }
-#[cfg(fuzzing)]
+#[cfg(any(fuzzing, feature = "expose_onion_utils"))]
 pub use self::fuzzy_internal_msgs::*;
-#[cfg(not(fuzzing))]
+#[cfg(not(any(fuzzing, feature = "expose_onion_utils")))]
 pub(crate) use self::fuzzy_internal_msgs::*;
 
 use super::onion_utils::AttributionData;
