@@ -2275,7 +2275,7 @@ impl Hop {
 /// Error returned when we fail to decode the onion packet.
 #[cfg(feature = "expose_onion_utils")]
 #[derive(Debug)]
-pub(crate) enum OnionDecodeErr {
+pub enum OnionDecodeErr {
 	/// The HMAC of the onion packet did not match the hop data.
 	Malformed { err_msg: &'static str, reason: LocalHTLCFailureReason },
 	/// We failed to decode the onion payload.
