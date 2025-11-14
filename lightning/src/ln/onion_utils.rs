@@ -2658,6 +2658,7 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 	let mut chacha_stream = ChaChaReader { chacha: &mut chacha, read: Cursor::new(&hop_data[..]) };
 	match R::read(&mut chacha_stream, read_args) {
 		Err(err) => {
+			println!("DecodeError: {:?}", err);
 			let reason = match err {
 				// Unknown version
 				msgs::DecodeError::UnknownVersion => LocalHTLCFailureReason::InvalidOnionVersion,
@@ -2678,6 +2679,7 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 		Ok(msg) => {
 			let mut hmac = [0; 32];
 			if let Err(_) = chacha_stream.read_exact(&mut hmac[..]) {
+				println!("Unable to decode our hop data hmac[0; 32]");
 				return Err(OnionDecodeErr::Relay {
 					err_msg: "Unable to decode our hop data",
 					reason: LocalHTLCFailureReason::InvalidOnionPayload,
