@@ -2161,6 +2161,92 @@ impl NextPacketBytes for Vec<u8> {
 }
 
 /// Data decrypted from a payment's onion payload.
+#[cfg(feature = "expose_onion_utils")]
+pub enum Hop {
+	/// This onion payload needs to be forwarded to a next-hop.
+	Forward {
+		/// Onion payload data used in forwarding the payment.
+		next_hop_data: msgs::InboundOnionForwardPayload,
+		/// Shared secret that was used to decrypt next_hop_data.
+		shared_secret: SharedSecret,
+		/// HMAC of the next hop's onion packet.
+		next_hop_hmac: [u8; 32],
+		/// Bytes of the onion packet we're forwarding.
+		new_packet_bytes: [u8; ONION_DATA_LEN],
+	},
+	/// This onion was received via Trampoline, and needs to be forwarded to a subsequent Trampoline
+	/// node.
+	TrampolineForward {
+		#[allow(unused)]
+		outer_hop_data: msgs::InboundTrampolineEntrypointPayload,
+		outer_shared_secret: SharedSecret,
+		incoming_trampoline_public_key: PublicKey,
+		trampoline_shared_secret: SharedSecret,
+		next_trampoline_hop_data: msgs::InboundTrampolineForwardPayload,
+		next_trampoline_hop_hmac: [u8; 32],
+		new_trampoline_packet_bytes: Vec<u8>,
+	},
+	/// This onion was received via Trampoline, and needs to be forwarded to a subsequent Trampoline
+	/// node.
+	TrampolineBlindedForward {
+		outer_hop_data: msgs::InboundTrampolineEntrypointPayload,
+		outer_shared_secret: SharedSecret,
+		#[allow(unused)]
+		incoming_trampoline_public_key: PublicKey,
+		trampoline_shared_secret: SharedSecret,
+		next_trampoline_hop_data: msgs::InboundTrampolineBlindedForwardPayload,
+		next_trampoline_hop_hmac: [u8; 32],
+		new_trampoline_packet_bytes: Vec<u8>,
+	},
+	/// This onion payload needs to be forwarded to a next-hop.
+	BlindedForward {
+		/// Onion payload data used in forwarding the payment.
+		next_hop_data: msgs::InboundOnionBlindedForwardPayload,
+		/// Shared secret that was used to decrypt next_hop_data.
+		shared_secret: SharedSecret,
+		/// HMAC of the next hop's onion packet.
+		next_hop_hmac: [u8; 32],
+		/// Bytes of the onion packet we're forwarding.
+		new_packet_bytes: [u8; ONION_DATA_LEN],
+	},
+	/// This onion payload was for us, not for forwarding to a next-hop. Contains information for
+	/// verifying the incoming payment.
+	Receive {
+		/// Onion payload data used to receive our payment.
+		hop_data: msgs::InboundOnionReceivePayload,
+		/// Shared secret that was used to decrypt hop_data.
+		shared_secret: SharedSecret,
+	},
+	/// This onion payload was for us, not for forwarding to a next-hop. Contains information for
+	/// verifying the incoming payment.
+	BlindedReceive {
+		/// Onion payload data used to receive our payment.
+		hop_data: msgs::InboundOnionBlindedReceivePayload,
+		/// Shared secret that was used to decrypt hop_data.
+		shared_secret: SharedSecret,
+	},
+	/// This onion payload was for us, not for forwarding to a next-hop, and it was sent to us via
+	/// Trampoline. Contains information for verifying the incoming payment.
+	TrampolineReceive {
+		#[allow(unused)]
+		outer_hop_data: msgs::InboundTrampolineEntrypointPayload,
+		outer_shared_secret: SharedSecret,
+		trampoline_hop_data: msgs::InboundOnionReceivePayload,
+		trampoline_shared_secret: SharedSecret,
+	},
+	/// This onion payload was for us, not for forwarding to a next-hop, and it was sent to us via
+	/// Trampoline. Contains information for verifying the incoming payment.
+	TrampolineBlindedReceive {
+		#[allow(unused)]
+		outer_hop_data: msgs::InboundTrampolineEntrypointPayload,
+		outer_shared_secret: SharedSecret,
+		trampoline_hop_data: msgs::InboundOnionBlindedReceivePayload,
+		trampoline_shared_secret: SharedSecret,
+	},
+}
+
+/// Data decrypted from a payment's onion payload.
+#[cfg(not(feature = "expose_onion_utils"))]
 pub(crate) enum Hop {
 	/// This onion payload needs to be forwarded to a next-hop.
 	Forward {
