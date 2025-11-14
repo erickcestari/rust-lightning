@@ -7259,12 +7259,24 @@ where
 								short_chan_id,
 								&self.chain_hash,
 							) {
+							#[cfg(not(feature = "expose_onion_utils"))]
 							let decode_res = onion_utils::decode_next_payment_hop(
 								Recipient::PhantomNode,
 								&onion_packet.public_key.unwrap(),
 								&onion_packet.hop_data,
 								onion_packet.hmac,
 								payment_hash,
+								None,
+								&*self.node_signer,
+							);
+
+							#[cfg(feature = "expose_onion_utils")]
+							let decode_res = onion_utils::decode_next_payment_hop(
+								Recipient::PhantomNode,
+								&onion_packet.public_key.unwrap(),
+								&onion_packet.hop_data,
+								onion_packet.hmac,
+								Some(payment_hash),
 								None,
 								&*self.node_signer,
 							);

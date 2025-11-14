@@ -557,6 +557,21 @@ where
 		}), reason));
 	};
 
+	#[cfg(feature = "expose_onion_utils")]
+	let next_hop = match onion_utils::decode_next_payment_hop(
+		Recipient::Node, &msg.onion_routing_packet.public_key.unwrap(), &msg.onion_routing_packet.hop_data[..], msg.onion_routing_packet.hmac,
+		Some(msg.payment_hash), msg.blinding_point, node_signer
+	) {
+		Ok(res) => res,
+		Err(onion_utils::OnionDecodeErr::Malformed { err_msg, reason }) => {
+			return encode_malformed_error(err_msg, reason);
+		},
+		Err(onion_utils::OnionDecodeErr::Relay { err_msg, reason, shared_secret, trampoline_shared_secret }) => {
+			return encode_relay_error(err_msg, reason, shared_secret.secret_bytes(), trampoline_shared_secret.map(|tss| tss.secret_bytes()), &[0; 0]);
+		},
+	};
+
+	#[cfg(not(feature = "expose_onion_utils"))]
 	let next_hop = match onion_utils::decode_next_payment_hop(
 		Recipient::Node, &msg.onion_routing_packet.public_key.unwrap(), &msg.onion_routing_packet.hop_data[..], msg.onion_routing_packet.hmac,
 		msg.payment_hash, msg.blinding_point, node_signer
