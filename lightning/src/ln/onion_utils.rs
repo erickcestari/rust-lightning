@@ -2637,6 +2637,7 @@ where
 	);
 	match decoded_hop {
 		Ok((next_hop_data, Some((next_hop_hmac, FixedSizeOnionPacket(new_packet_bytes))))) => {
+			println!("new_packet_bytes size: {:?}", new_packet_bytes.len());
 			match next_hop_data {
 				msgs::InboundOnionPayload::Forward(next_hop_data) => Ok(Hop::Forward {
 					shared_secret,
@@ -2654,12 +2655,14 @@ where
 				},
 				_ => {
 					if blinding_point.is_some() {
+						println!("BLINDED Final Node OnionHopData provided for us as an intermediary node");
 						return Err(OnionDecodeErr::Malformed {
 							err_msg:
 								"Final Node OnionHopData provided for us as an intermediary node",
 							reason: LocalHTLCFailureReason::InvalidOnionBlinding,
 						});
 					}
+					println!("Final Node OnionHopData provided for us as an intermediary node");
 					Err(OnionDecodeErr::Relay {
 						err_msg: "Final Node OnionHopData provided for us as an intermediary node",
 						reason: LocalHTLCFailureReason::InvalidOnionPayload,
@@ -3009,9 +3012,11 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 				}
 				return Ok((msg, None)); // We are the final destination for this packet
 			} else {
+				println!("Reading {} bytes", hop_data.len());
 				let mut new_packet_bytes = N::new(hop_data.len());
 				let read_pos = hop_data.len() - chacha_stream.read.position() as usize;
 				chacha_stream.read_exact(&mut new_packet_bytes.as_mut()[..read_pos]).unwrap();
+				println!("Reading 1");
 				#[cfg(debug_assertions)]
 				{
 					// Check two things:
@@ -3024,6 +3029,7 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 				// Once we've emptied the set of bytes our peer gave us, encrypt 0 bytes until we
 				// fill the onion hop data we'll forward to our next-hop peer.
 				chacha_stream.chacha.process_in_place(&mut new_packet_bytes.as_mut()[read_pos..]);
+				println!("hmac: {:?}", hmac);
 				return Ok((msg, Some((hmac, new_packet_bytes)))); // This packet needs forwarding
 			}
 		},
