@@ -2671,6 +2671,7 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 			} else {
 				let mut new_packet_bytes = N::new(hop_data.len());
 				let read_pos = hop_data.len() - chacha_stream.read.position() as usize;
+				print!("read_pos: {}", read_pos);
 				chacha_stream.read_exact(&mut new_packet_bytes.as_mut()[..read_pos]).unwrap();
 				#[cfg(debug_assertions)]
 				{
@@ -2684,6 +2685,7 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 				// Once we've emptied the set of bytes our peer gave us, encrypt 0 bytes until we
 				// fill the onion hop data we'll forward to our next-hop peer.
 				chacha_stream.chacha.process_in_place(&mut new_packet_bytes.as_mut()[read_pos..]);
+				print!("this packet needs forwarding");
 				return Ok((msg, Some((hmac, new_packet_bytes)))); // This packet needs forwarding
 			}
 		},
