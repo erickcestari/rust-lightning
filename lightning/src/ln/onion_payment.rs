@@ -630,7 +630,7 @@ pub(super) fn decode_incoming_update_add_htlc_onion<NS: NodeSigner, L: Logger, T
 
 	let next_hop = match onion_utils::decode_next_payment_hop(
 		Recipient::Node, &msg.onion_routing_packet.public_key.unwrap(), &msg.onion_routing_packet.hop_data[..], msg.onion_routing_packet.hmac,
-		msg.payment_hash, msg.blinding_point, node_signer
+		Some(msg.payment_hash), msg.blinding_point, node_signer
 	) {
 		Ok(res) => res,
 		Err(onion_utils::OnionDecodeErr::Malformed { err_msg, reason }) => {

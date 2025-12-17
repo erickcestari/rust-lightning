@@ -2750,10 +2750,7 @@ mod fuzzy_internal_msgs {
 		pub attribution_data: Option<AttributionData>,
 	}
 }
-#[cfg(fuzzing)]
 pub use self::fuzzy_internal_msgs::*;
-#[cfg(not(fuzzing))]
-pub(crate) use self::fuzzy_internal_msgs::*;
 
 use super::onion_utils::AttributionData;
 
