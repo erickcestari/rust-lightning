@@ -2187,7 +2187,7 @@ impl HTLCFailReason {
 
 /// Allows `decode_next_hop` to return the next hop packet bytes for either payments or onion
 /// message forwards.
-pub(crate) trait NextPacketBytes: AsMut<[u8]> {
+pub trait NextPacketBytes: AsMut<[u8]> {
 	fn new(len: usize) -> Self;
 }
 
@@ -2204,7 +2204,7 @@ impl NextPacketBytes for Vec<u8> {
 }
 
 /// Data decrypted from a payment's onion payload.
-pub(crate) enum Hop {
+pub enum Hop {
 	/// This onion payload needs to be forwarded to a next-hop.
 	Forward {
 		/// Onion payload data used in forwarding the payment.
@@ -2329,7 +2329,7 @@ impl Hop {
 
 /// Error returned when we fail to decode the onion packet.
 #[derive(Debug)]
-pub(crate) enum OnionDecodeErr {
+pub enum OnionDecodeErr {
 	/// The HMAC of the onion packet did not match the hop data.
 	Malformed { err_msg: &'static str, reason: LocalHTLCFailureReason },
 	/// We failed to decode the onion payload.
@@ -2344,9 +2344,9 @@ pub(crate) enum OnionDecodeErr {
 	},
 }
 
-pub(crate) fn decode_next_payment_hop<NS: NodeSigner>(
+pub fn decode_next_payment_hop<NS: NodeSigner>(
 	recipient: Recipient, hop_pubkey: &PublicKey, hop_data: &[u8], hmac_bytes: [u8; 32],
-	payment_hash: PaymentHash, blinding_point: Option<PublicKey>, node_signer: NS,
+	payment_hash: Option<PaymentHash>, blinding_point: Option<PublicKey>, node_signer: NS,
 ) -> Result<Hop, OnionDecodeErr> {
 	let blinded_node_id_tweak = blinding_point.map(|bp| {
 		let blinded_tlvs_ss = node_signer.ecdh(recipient, &bp, None).unwrap().secret_bytes();
@@ -2361,7 +2361,7 @@ pub(crate) fn decode_next_payment_hop<NS: NodeSigner>(
 		shared_secret.secret_bytes(),
 		hop_data,
 		hmac_bytes,
-		Some(payment_hash),
+		payment_hash,
 		(blinding_point, &node_signer),
 	);
 	match decoded_hop {
@@ -2435,8 +2435,8 @@ pub(crate) fn decode_next_payment_hop<NS: NodeSigner>(
 					trampoline_shared_secret,
 					&hop_data.trampoline_packet.hop_data,
 					hop_data.trampoline_packet.hmac,
-					Some(payment_hash),
-					(blinding_point, &node_signer),
+					payment_hash,
+					(blinding_point, node_signer),
 				);
 				match decoded_trampoline_hop {
 					Ok((
