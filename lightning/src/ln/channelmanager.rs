@@ -7440,7 +7440,7 @@ where
 								&onion_packet.public_key.unwrap(),
 								&onion_packet.hop_data,
 								onion_packet.hmac,
-								payment_hash,
+								Some(payment_hash),
 								None,
 								&*self.node_signer,
 							);
