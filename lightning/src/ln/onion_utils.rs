@@ -2792,8 +2792,8 @@ pub(crate) const HMAC_COUNT: usize = MAX_HOPS * (MAX_HOPS + 1) / 2;
 /// Additionally, it allows a sender to identify how long each hop along a path held an HTLC, with
 /// 100ms granularity.
 pub struct AttributionData {
-	hold_times: [u8; MAX_HOPS * HOLD_TIME_LEN],
-	hmacs: [u8; HMAC_LEN * HMAC_COUNT],
+	pub hold_times: [u8; MAX_HOPS * HOLD_TIME_LEN],
+	pub hmacs: [u8; HMAC_LEN * HMAC_COUNT],
 }
 
 impl AttributionData {
