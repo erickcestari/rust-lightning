@@ -1980,6 +1980,9 @@ impl<
 											(msgs::DecodeError::UnknownVersion, _) => {
 												return Err(PeerHandleError {})
 											},
+											(msgs::DecodeError::SkipCase, _) => {
+												return Err(PeerHandleError {})
+											},
 											(msgs::DecodeError::InvalidValue, _) => {
 												log_debug!(logger, "Got an invalid value while deserializing message");
 												return Err(PeerHandleError {});

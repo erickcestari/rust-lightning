@@ -2708,18 +2708,28 @@ fn decode_next_hop<T, R: ReadableArgs<T>, N: NextPacketBytes>(
 	let mut chacha_stream = ChaChaReader { chacha: &mut chacha, read: Cursor::new(&hop_data[..]) };
 	match R::read(&mut chacha_stream, read_args) {
 		Err(err) => {
-			let reason = match err {
+			let (reason, err_msg) = match err {
 				// Unknown version
-				msgs::DecodeError::UnknownVersion => LocalHTLCFailureReason::InvalidOnionVersion,
+				msgs::DecodeError::UnknownVersion => {
+					(LocalHTLCFailureReason::InvalidOnionVersion, "Unable to decode our hop data")
+				},
 				// invalid_onion_payload
+				msgs::DecodeError::SkipCase => (
+					LocalHTLCFailureReason::InvalidOnionPayload,
+					"Should be skipped by bitcoinfuzz",
+				),
 				msgs::DecodeError::UnknownRequiredFeature
 				| msgs::DecodeError::InvalidValue
-				| msgs::DecodeError::ShortRead => LocalHTLCFailureReason::InvalidOnionPayload,
+				| msgs::DecodeError::ShortRead => {
+					(LocalHTLCFailureReason::InvalidOnionPayload, "Unable to decode our hop data")
+				},
 				// Should never happen
-				_ => LocalHTLCFailureReason::TemporaryNodeFailure,
+				_ => {
+					(LocalHTLCFailureReason::TemporaryNodeFailure, "Unable to decode our hop data")
+				},
 			};
 			return Err(OnionDecodeErr::Relay {
-				err_msg: "Unable to decode our hop data",
+				err_msg,
 				reason,
 				shared_secret: SharedSecret::from_bytes(shared_secret),
 				trampoline_shared_secret: None,
