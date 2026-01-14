@@ -102,6 +102,8 @@ pub enum DecodeError {
 	/// [`ChannelManager`]: crate::ln::channelmanager::ChannelManager
 	/// [`ChannelMonitor`]: crate::chain::channelmonitor::ChannelMonitor
 	DangerousValue,
+	/// This a custom error used by Bitcoinfuzz to skip some errors.
+	SkipCase
 }
 
 /// An [`init`] message to be sent to or received from a peer.
@@ -2854,6 +2856,9 @@ impl fmt::Display for DecodeError {
 			DecodeError::DangerousValue => {
 				f.write_str("Value would be dangerous to continue execution with")
 			},
+			DecodeError::SkipCase => {
+				f.write_str("Should be skipped by bitcoinfuzz")
+			},
 		}
 	}
 }
@@ -3794,6 +3799,9 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundOnionPaylo
 		let mut custom_tlvs = Vec::new();
 
 		let tlv_len = BigSize::read(r)?;
+		if tlv_len.0 < 2 {
+			return Err(DecodeError::SkipCase);
+		}
 		let mut rd = FixedLengthReader::new(r, tlv_len.0);
 
 		decode_tlv_stream_with_custom_tlv_decode!(&mut rd, {
@@ -3818,7 +3826,7 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundOnionPaylo
 		});
 
 		if amt.unwrap_or(0) > MAX_VALUE_MSAT {
-			return Err(DecodeError::InvalidValue);
+			return Err(DecodeError::SkipCase);
 		}
 		if intro_node_blinding_point.is_some() && update_add_blinding_point.is_some() {
 			return Err(DecodeError::InvalidValue);
@@ -3865,7 +3873,8 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundOnionPaylo
 					used_aad,
 				} => {
 					if amt.is_some()
-						|| cltv_value.is_some() || total_msat.is_some()
+						|| cltv_value.is_some()
+						|| total_msat.is_some()
 						|| keysend_preimage.is_some()
 						|| invoice_request.is_some()
 						|| used_aad != TriPolyAADUsed::None
@@ -3912,7 +3921,7 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundOnionPaylo
 						receive_tlvs;
 
 					if total_msat.unwrap_or(0) > MAX_VALUE_MSAT {
-						return Err(DecodeError::InvalidValue);
+						return Err(DecodeError::SkipCase);
 					}
 					Ok(Self::BlindedReceive(InboundOnionBlindedReceivePayload {
 						sender_intended_htlc_amt_msat: amt.ok_or(DecodeError::InvalidValue)?,
@@ -3935,7 +3944,7 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundOnionPaylo
 				|| total_msat.is_some()
 				|| invoice_request.is_some()
 			{
-				return Err(DecodeError::InvalidValue);
+				return Err(DecodeError::SkipCase);
 			}
 			Ok(Self::Forward(InboundOnionForwardPayload {
 				short_channel_id,
@@ -3944,11 +3953,11 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundOnionPaylo
 			}))
 		} else {
 			if encrypted_tlvs_opt.is_some() || total_msat.is_some() || invoice_request.is_some() {
-				return Err(DecodeError::InvalidValue);
+				return Err(DecodeError::SkipCase);
 			}
 			if let Some(data) = &payment_data {
 				if data.total_msat > MAX_VALUE_MSAT {
-					return Err(DecodeError::InvalidValue);
+					return Err(DecodeError::SkipCase);
 				}
 			}
 			Ok(Self::Receive(InboundOnionReceivePayload {
@@ -4035,7 +4044,8 @@ impl<NS: NodeSigner> ReadableArgs<(Option<PublicKey>, NS)> for InboundTrampoline
 					used_aad,
 				} => {
 					if amt.is_some()
-						|| cltv_value.is_some() || total_msat.is_some()
+						|| cltv_value.is_some()
+						|| total_msat.is_some()
 						|| keysend_preimage.is_some()
 						|| invoice_request.is_some()
 						|| used_aad != TriPolyAADUsed::None
